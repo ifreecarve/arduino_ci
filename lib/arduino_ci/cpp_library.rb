@@ -23,9 +23,6 @@ module ArduinoCI
     # @return [ArduinoBackend] The backend support for this library
     attr_reader :backend
 
-    # @return [Array<Pathname>] The set of artifacts created by this class (note: incomplete!)
-    attr_reader :artifacts
-
     # @return [Array<Pathname>] The set of directories that should be excluded from compilation
     attr_reader :exclude_dirs
 
@@ -50,7 +47,6 @@ module ArduinoCI
       @name = friendly_name
       @backend = backend
       @info_cache = nil
-      @artifacts = []
       @last_err = ""
       @last_out = ""
       @last_msg = ""
@@ -132,7 +128,10 @@ module ArduinoCI
     # @param installed_library_path [String] The library to query
     # @return [Array<String>] Example sketch files
     def example_sketches
-      reported_dirs = info["library"]["examples"].map(&Pathname::method(:new))
+      examples = info["library"]["examples"]
+      return [] if examples.nil?
+
+      reported_dirs = examples.map(&Pathname::method(:new))
       reported_dirs.map { |e| e + e.basename.sub_ext(".ino") }.select(&:exist?).sort_by(&:to_s)
     end
 
@@ -443,7 +442,7 @@ module ArduinoCI
     def warning_args(ci_gcc_config)
       return [] if ci_gcc_config[:warnings].nil?
 
-      ci_gcc_config[:features].map { |w| "-W#{w}" }
+      ci_gcc_config[:warnings].map { |w| "-W#{w}" }
     end
 
     # GCC command line arguments for defines (e.g. -Dhave_something)
@@ -488,13 +487,13 @@ module ArduinoCI
     # @param test_file [Pathname] The path to the file containing the unit tests
     # @param aux_libraries [Array<Pathname>] The external Arduino libraries required by this project
     # @param ci_gcc_config [Hash] The GCC config object
-    # @return [Pathname] path to the compiled test executable
+    # @return [Tempfile] the compiled test executable
     def build_for_test_with_configuration(test_file, aux_libraries, gcc_binary, ci_gcc_config)
       base = test_file.basename
-      executable = Pathname.new("unittest_#{base}.bin").expand_path
-      File.delete(executable) if File.exist?(executable)
+      executable = Tempfile.new("unittest_#{base}.bin")
+      executable.close
       arg_sets = []
-      arg_sets << ["-std=c++0x", "-o", executable.to_s, "-DARDUINO=100"]
+      arg_sets << ["-std=c++0x", "-o", executable.path, "-DARDUINO=100"]
       if libasan?(gcc_binary)
         arg_sets << [ # Stuff to help with dynamic memory mishandling
           "-g", "-O1",
@@ -511,17 +510,20 @@ module ArduinoCI
       arg_sets << cpp_files_libraries(full_dependencies).map(&:to_s)
       arg_sets << [test_file.to_s]
       args = arg_sets.flatten(1)
-      return nil unless run_gcc(gcc_binary, *args)
+      unless run_gcc(gcc_binary, *args)
+        executable.unlink
+        return nil
+      end
 
-      artifacts << executable
       executable
     end
 
     # print any found stack dumps
-    # @param executable [Pathname] the path to the test file
+    # @param executable [Tempfile] the path to the test file
     def print_stack_dump(executable)
+      path = Pathname.new(executable.path)
       possible_dumpfiles = [
-        executable.sub_ext("#{executable.extname}.stackdump")
+        path.sub_ext("#{path.extname}.stackdump")
       ]
       possible_dumpfiles.select(&:exist?).each do |dump|
         puts "========== Stack dump from #{dump}:"

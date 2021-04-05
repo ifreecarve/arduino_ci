@@ -7,14 +7,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## [Unreleased]
 ### Added
+- Working directory is now printed in test runner output
+- Explicitly include `irb` via rubygems
+- `arduino:megaavr` architecture is now included by default, using the `nano_every` platform, via midasgossye
 
 ### Changed
+- Update .gitattributes so we have consistent line endings
+- Test runner detects console width if possible, allowing variable width from 80-132 chars
+- Unit test executables are now built as tempfiles
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- A missing `examples` directory no longer causes a crash in `cpp_library.rb`
+- Referring to an undefined platform no longer causes a crash; it's now a helpful error message
+- A copy/paste error that prevented compiler warning flags from being supplied has been fixed, via jgfoster
+- RSpec was not communicating compile errors from unit test executables that failed to build. Now it does, via jgfoster
+- Windows paths now avoid picking up backslashes, for proper equality comparisons
 
 ### Security
 

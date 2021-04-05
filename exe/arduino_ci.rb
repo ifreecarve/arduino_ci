@@ -3,8 +3,14 @@ require 'arduino_ci'
 require 'set'
 require 'pathname'
 require 'optparse'
+require 'io/console'
 
-WIDTH = 80
+# be flexible between 80 and 132 cols of output
+WIDTH = begin
+  [132, [80, IO::console.winsize[1] - 2].max].min
+rescue NoMethodError
+  80
+end
 VAR_CUSTOM_INIT_SCRIPT = "CUSTOM_INIT_SCRIPT".freeze
 VAR_USE_SUBDIR         = "USE_SUBDIR".freeze
 VAR_EXPECT_EXAMPLES    = "EXPECT_EXAMPLES".freeze
@@ -17,13 +23,9 @@ VAR_EXPECT_UNITTESTS   = "EXPECT_UNITTESTS".freeze
 # Use some basic parsing to allow command-line overrides of config
 class Parser
   def self.parse(options)
-    unit_config = {}
     output_options = {
       skip_unittests: false,
       skip_compilation: false,
-      ci_config: {
-        "unittest" => unit_config
-      },
     }
 
     opt_parser = OptionParser.new do |opts|
@@ -383,14 +385,13 @@ def choose_platform_set(config, reason, desired_platforms, library_properties)
 end
 
 # Unit test procedure
-def perform_unit_tests(cpp_library, file_config)
+def perform_unit_tests(cpp_library, config)
   phase("Unit testing")
   if @cli_options[:skip_unittests]
     inform("Skipping unit tests") { "as requested via command line" }
     return
   end
 
-  config = file_config.with_override_config(@cli_options[:ci_config])
   compilers = get_annotated_compilers(config, cpp_library)
 
   inform("Library conforms to Arduino library specification") { cpp_library.one_point_five? ? "1.5" : "1.0" }
@@ -410,6 +411,11 @@ def perform_unit_tests(cpp_library, file_config)
       arches = cpp_library.library_properties.nil? ? nil : cpp_library.library_properties.architectures
       puts "    Architectures in library.properties: #{arches}"
     end
+  end
+
+  # having undefined platforms is a config error
+  platforms.select { |p| config.platform_info[p].nil? }.each do |p|
+    assure("Platform '#{p}' is defined in configuration files") { false }
   end
 
   install_arduino_library_dependencies(config.aux_libraries_for_unittest, "<unittest/libraries>")
@@ -433,7 +439,9 @@ def perform_unit_tests(cpp_library, file_config)
             puts cpp_library.last_err
             next false
           end
-          cpp_library.run_test_file(exe)
+          cpp_library.run_test_file(Pathname.new(exe.path))
+        ensure
+          exe&.unlink
         end
       end
     end
@@ -462,6 +470,7 @@ def perform_example_compilation_tests(cpp_library, config)
     ovr_config = config.from_example(example_path)
     platforms = choose_platform_set(ovr_config, "library example", ovr_config.platforms_to_build, cpp_library.library_properties)
 
+    # having no platforms defined is probably an error
     if platforms.empty?
       explain_and_exercise_envvar(VAR_EXPECT_EXAMPLES, "examples compilation", "platforms and architectures") do
         puts "    Configured platforms: #{ovr_config.platforms_to_build}"
@@ -471,11 +480,16 @@ def perform_example_compilation_tests(cpp_library, config)
       end
     end
 
+    # having undefined platforms is a config error
+    platforms.select { |p| ovr_config.platform_info[p].nil? }.each do |p|
+      assure("Platform '#{p}' is defined in configuration files") { false }
+    end
+
     install_all_packages(platforms, ovr_config)
     install_arduino_library_dependencies(ovr_config.aux_libraries_for_build, "<compile/libraries>")
 
     platforms.each do |p|
-      board = ovr_config.platform_info[p][:board]
+      board = ovr_config.platform_info[p][:board] # assured to exist, above
       attempt("Compiling #{example_name} for #{board}") do
         ret = @backend.compile_sketch(example_path, board)
         unless ret
@@ -491,6 +505,7 @@ end
 
 banner
 inform("Host OS") { ArduinoCI::Host.os }
+inform("Working directory") { Dir.pwd }
 
 # initialize command and config
 config = ArduinoCI::CIConfig.default.from_project_library
