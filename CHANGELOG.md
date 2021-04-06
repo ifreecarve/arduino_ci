@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Changed
 - Change 266 files from CRLF to LF.
+- Update .gitattributes so we have consistent line endings
 
 ### Deprecated
 
